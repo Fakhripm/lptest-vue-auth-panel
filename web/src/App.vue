@@ -6,17 +6,48 @@ const mode = ref("login");
 const email = ref("");
 const password = ref("");
 const name = ref("");
+const remember = ref(false);
 const token = ref(localStorage.getItem("token") || "");
+const refreshToken = ref(localStorage.getItem("refreshToken") || "");
 const user = ref(null);
+const meta = ref(null);
 const error = ref("");
 const loading = ref(false);
 
 async function refreshMe() {
-  if (!token.value) { user.value = null; return; }
+  if (!token.value) { user.value = null; meta.value = null; return; }
   const res = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token.value}` } });
   const data = await res.json();
-  if (!data.ok) { token.value = ""; localStorage.removeItem("token"); user.value = null; return; }
+  if (!data.ok) {
+    if (refreshToken.value) {
+      const ok = await tryRefresh();
+      if (ok) return refreshMe();
+    }
+    token.value = "";
+    refreshToken.value = "";
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
+    user.value = null;
+    meta.value = null;
+    return;
+  }
   user.value = data.user;
+  meta.value = { iat: data.iat, exp: data.exp };
+}
+
+async function tryRefresh() {
+  const res = await fetch(`${API}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: refreshToken.value })
+  });
+  const data = await res.json();
+  if (!data.ok) return false;
+  token.value = data.token;
+  refreshToken.value = data.refreshToken;
+  localStorage.setItem("token", data.token);
+  localStorage.setItem("refreshToken", data.refreshToken);
+  return true;
 }
 
 async function submit() {
@@ -25,8 +56,8 @@ async function submit() {
   try {
     const path = mode.value === "login" ? "/auth/login" : "/auth/register";
     const body = mode.value === "login"
-      ? { email: email.value, password: password.value }
-      : { email: email.value, password: password.value, name: name.value };
+      ? { email: email.value, password: password.value, remember: remember.value }
+      : { email: email.value, password: password.value, name: name.value, remember: remember.value };
     const res = await fetch(`${API}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -35,8 +66,11 @@ async function submit() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "failed");
     token.value = data.token;
+    refreshToken.value = data.refreshToken || "";
     localStorage.setItem("token", data.token);
+    if (data.refreshToken) localStorage.setItem("refreshToken", data.refreshToken);
     user.value = data.user;
+    await refreshMe();
   } catch (e) {
     error.value = e.message;
   } finally {
@@ -44,10 +78,16 @@ async function submit() {
   }
 }
 
-function logout() {
+async function logout() {
+  try {
+    await fetch(`${API}/auth/logout`, { method: "POST" });
+  } catch { /* ignore */ }
   token.value = "";
+  refreshToken.value = "";
   user.value = null;
+  meta.value = null;
   localStorage.removeItem("token");
+  localStorage.removeItem("refreshToken");
 }
 
 onMounted(refreshMe);
@@ -63,6 +103,7 @@ onMounted(refreshMe);
     <section v-if="user" class="card">
       <h1>سلام، {{ user.name }}</h1>
       <p class="muted">{{ user.email }}</p>
+      <p v-if="meta" class="muted tiny">iat {{ meta.iat }} · exp {{ meta.exp }}</p>
       <button @click="logout">خروج</button>
     </section>
 
@@ -80,6 +121,9 @@ onMounted(refreshMe);
         </label>
         <label>رمز
           <input v-model="password" type="password" required minlength="6" />
+        </label>
+        <label class="check">
+          <input v-model="remember" type="checkbox" /> Remember me (30d)
         </label>
         <p v-if="error" class="err">{{ error }}</p>
         <button type="submit" :disabled="loading">{{ loading ? "..." : (mode === 'login' ? 'ورود' : 'ثبت‌نام') }}</button>
@@ -103,12 +147,15 @@ body { margin: 0; background: radial-gradient(800px 400px at 20% 0%, #1a3040, va
 .page { max-width: 420px; margin: 0 auto; padding: 2rem 1rem; }
 header { display: flex; justify-content: space-between; margin-bottom: 1.5rem; }
 .muted { color: var(--muted); font-size: 0.9rem; }
+.tiny { font-size: 0.75rem; font-family: monospace; }
 .card { background: var(--card); border: 1px solid #2a3542; border-radius: 12px; padding: 1.5rem; }
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
 .tabs button, button { cursor: pointer; border: 0; border-radius: 8px; padding: 0.7rem 1rem; background: #243040; color: var(--ink); }
 .tabs button.on, button[type="submit"] { background: var(--accent); color: #041018; font-weight: 600; }
 label { display: block; margin-bottom: 0.85rem; font-size: 0.9rem; }
+label.check { display: flex; align-items: center; gap: 0.5rem; }
 input { width: 100%; margin-top: 0.35rem; padding: 0.65rem 0.75rem; border-radius: 8px; border: 1px solid #2a3542; background: #121820; color: var(--ink); }
+label.check input { width: auto; margin: 0; }
 .err { color: var(--err); }
 h1 { margin: 0 0 0.35rem; font-size: 1.4rem; }
 </style>

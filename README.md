@@ -11,6 +11,13 @@ Full-stack **login / register** — Vue 3 + Node JWT.
 
 **https://kianpk.github.io/vue-auth-panel/**
 
+## Features
+
+- Register / login with JWT access + refresh tokens
+- Remember-me (`remember: true` → 30d access, else 1d)
+- `POST /auth/refresh`, stateless `POST /auth/logout`
+- `GET /auth/me` returns user plus `iat` / `exp`
+
 ## Quick start
 
 ```bash
